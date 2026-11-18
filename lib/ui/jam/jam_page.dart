@@ -11,6 +11,7 @@ import '../../features/jam/jam_client.dart';
 import '../components/artwork.dart';
 import '../components/buttons.dart';
 import '../components/inputs.dart';
+import '../components/text_selection.dart';
 import '../theme/tokens.dart';
 import '../theme/wave_icons.dart';
 
@@ -229,7 +230,10 @@ class _WaveJamPageState extends ConsumerState<WaveJamPage> {
                   children: [
                     _Label('Your name'),
                     const SizedBox(height: 6),
-                    TextBox(padding: waveFieldPadding, 
+                    TextBox(
+                      selectionControls: waveTextSelectionControls,
+                      contextMenuBuilder: waveTextContextMenuBuilder,
+                      padding: waveFieldPadding, 
                       controller: _name,
                       placeholder: 'Listener',
                       decoration: waveInputDecoration(),
@@ -348,7 +352,9 @@ class _WaveJamPageState extends ConsumerState<WaveJamPage> {
                     Row(
                       children: [
                         Expanded(
-                          child: TextBox(padding: waveFieldPadding, 
+                          child: TextBox(
+                            selectionControls: waveTextSelectionControls,
+                            contextMenuBuilder: waveTextContextMenuBuilder,padding: waveFieldPadding, 
                             controller: _code,
                             placeholder: 'ABC123',
                             decoration: waveInputDecoration(),
@@ -468,7 +474,8 @@ class _WaveJamPageState extends ConsumerState<WaveJamPage> {
                 ),
                 child: SelectableText(
                   jam.roomName.isEmpty ? jam.roomCode : jam.roomName,
-                  contextMenuBuilder: TextBox.defaultContextMenuBuilder,
+                  selectionControls: waveTextSelectionControls,
+                  contextMenuBuilder: waveTextContextMenuBuilder,
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 30,
@@ -775,7 +782,9 @@ class _WaveJamPageState extends ConsumerState<WaveJamPage> {
             child: Row(
               children: [
                 Expanded(
-                  child: TextBox(padding: waveFieldPadding, 
+                  child: TextBox(
+                    selectionControls: waveTextSelectionControls,
+                    contextMenuBuilder: waveTextContextMenuBuilder,padding: waveFieldPadding, 
                     controller: _chat,
                     focusNode: _chatFocus,
                     placeholder: 'Message',
@@ -1011,7 +1020,8 @@ class _Bubble extends StatelessWidget {
                   SelectableText(
                     line.text,
                     style: WaveType.body,
-                    contextMenuBuilder: TextBox.defaultContextMenuBuilder,
+                    selectionControls: waveTextSelectionControls,
+                    contextMenuBuilder: waveTextContextMenuBuilder,
                   ),
                 ],
               ),
