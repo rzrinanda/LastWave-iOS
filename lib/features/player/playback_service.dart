@@ -106,6 +106,8 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
 
   bool _endlessRadio = false;
   final Set<String> _radioSeeds = {};
+  final Set<String> _radioRefillInflight = {};
+  int _radioGeneration = 0;
   bool _resolving = false;
   int _resolvingIndex = -1;
   int _resolveGeneration = 0;
@@ -680,6 +682,8 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
     // Flush the most recent queue and position before tearing down the player.
     _persistNow();
     _resolveGeneration++;
+    _radioGeneration++;
+    _radioRefillInflight.clear();
     _resolving = false;
     _resolvingIndex = -1;
     _activeQueueKey = '';
@@ -739,7 +743,9 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
       if (index < 0) index = 0;
     }
     _endlessRadio = endlessRadio;
+    _radioGeneration++;
     _radioSeeds.clear();
+    _radioRefillInflight.clear();
     _unavailable.clear();
     _losslessBypass.clear();
     _prefetchSeedKey = '';
@@ -755,6 +761,7 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
       position: Duration.zero,
       duration: Duration.zero,
     );
+    unawaited(_maybeRefillRadio());
     await _resolveAndOpen(index);
   }
 
@@ -805,6 +812,7 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
 
   Future<void> clearUpcoming() async {
     if (state.currentIndex < 0) return;
+    _radioGeneration++;
     final queue = state.queue.sublist(0, state.currentIndex + 1);
     // Nothing may follow the current track in shuffle either. Entries
     // after it in the old order can still point at valid, already played
@@ -1421,6 +1429,9 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
     } catch (_) {}
     _lastWasDash = false;
     _endlessRadio = false;
+    _radioGeneration++;
+    _radioSeeds.clear();
+    _radioRefillInflight.clear();
     _sessions.clear();
     _playCache.clear();
     _resolveInflight.clear();
@@ -1510,9 +1521,14 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
         await _open(track, local, generation, wantedQueueKey, play: play);
         localOpenSw.stop();
         totalSw.stop();
+        if (generation != _resolveGeneration ||
+            _activeQueueKey != wantedQueueKey) {
+          return;
+        }
         _logTiming('play key=$wantedQueueKey path=local '
             'mpv_open_ms=${localOpenSw.elapsedMilliseconds} '
             'total_ms=${totalSw.elapsedMilliseconds}');
+        unawaited(_maybeRefillRadio());
         return;
       }
       if (cached == null) {
@@ -1599,7 +1615,7 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
           'mpv_open_ms=${openSw.elapsedMilliseconds} '
           'total_ms=${totalSw.elapsedMilliseconds}');
 
-      _maybeRefillRadio();
+      unawaited(_maybeRefillRadio());
     } catch (e) {
       // Strictly ignore errors from outdated skip requests
       if (generation != _resolveGeneration || _activeQueueKey != wantedQueueKey) return;
@@ -2491,21 +2507,35 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
   // -- endless radio ---------------------------------------------------------------
 
   Future<void> _maybeRefillRadio() async {
-    if (!_endlessRadio) return;
+    if (!mounted || !_endlessRadio) return;
     final remaining = state.queue.length - state.currentIndex - 1;
     if (remaining > 6) return;
     final seed = state.current;
-    if (seed == null || _radioSeeds.contains(seed.mediaId)) return;
-    _radioSeeds.add(seed.mediaId);
+    if (seed == null ||
+        _radioSeeds.contains(seed.mediaId) ||
+        !_radioRefillInflight.add(seed.mediaId)) {
+      return;
+    }
+    final radioGen = _radioGeneration;
     try {
-      final videoId = seed.videoId.isNotEmpty
-          ? seed.videoId
-          : (await _tube.findBestMatchOrNull(seed.title, seed.artist))
-              ?.videoId;
-      if (videoId == null) return;
+      var videoId = _windowVideoId(seed);
+      if (videoId.isEmpty) {
+        final match =
+            await _tube.findBestMatchOrNull(seed.title, seed.artist) ??
+                await _tube.findBestEffortMatchOrNull(seed.title, seed.artist);
+        videoId = match?.videoId ?? '';
+      }
+      if (videoId.isEmpty) return;
+      if (!mounted || radioGen != _radioGeneration || !_endlessRadio) return;
       final related =
           await _tube.fetchRelatedSongs(videoId, limit: 25);
+      if (!mounted || radioGen != _radioGeneration || !_endlessRadio) return;
       final current = state.queue;
+      if (current.isEmpty ||
+          state.currentIndex < 0 ||
+          state.currentIndex >= current.length) {
+        return;
+      }
       final fresh = related
           .where((t) =>
               !_isDisallowedRadioTitle(t.title) &&
@@ -2518,14 +2548,24 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
                 album: t.album,
                 artworkUrl: t.artworkUrl,
                 videoId: t.videoId,
+                duration: Duration(seconds: t.durationSeconds),
               ))
           .toList();
       if (fresh.isEmpty) return;
-      final queue = [...state.queue, ...fresh];
+      _radioSeeds.add(seed.mediaId);
+      final queue = [...current, ...fresh];
       _rebuildShuffleOrder(queue.length, state.currentIndex);
       state = state.copyWith(queue: queue);
       _schedulePersist();
-    } catch (_) {}
+      if (_audioClockGeneration == -1) {
+        _prefetchNeighbors();
+      }
+    } catch (_) {
+    } finally {
+      if (radioGen == _radioGeneration) {
+        _radioRefillInflight.remove(seed.mediaId);
+      }
+    }
   }
 
   bool _isDisallowedRadioTitle(String title) {
@@ -2548,6 +2588,7 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
         '${t.title.toLowerCase()}|${t.artist.toLowerCase()}';
     final base = InnerTubeMusicApi.baseTitle(t.title);
     for (final q in queue) {
+      if (q.videoId.isNotEmpty && t.videoId == q.videoId) return true;
       if (q.queueKey == key) return true;
       if (InnerTubeMusicApi.similarity(
               InnerTubeMusicApi.baseTitle(q.title), base) <
@@ -2912,6 +2953,9 @@ class PlaybackService extends StateNotifier<PlayerSnapshot> {
     final index = ((data['currentIndex'] as num?)?.toInt() ?? 0)
         .clamp(0, queue.length - 1);
     _endlessRadio = data['endless'] == true;
+    _radioGeneration++;
+    _radioSeeds.clear();
+    _radioRefillInflight.clear();
     _rebuildShuffleOrder(queue.length, index);
     state = state.copyWith(
       queue: queue,

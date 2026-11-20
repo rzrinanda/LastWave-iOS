@@ -11,6 +11,7 @@ import 'text_selection.dart';
 import '../../app/track_actions.dart';
 import '../../core/audio/artist_parser.dart';
 import '../../core/audio/stream_models.dart';
+import '../../core/storage/prefs.dart';
 import '../../features/downloads/download_manager.dart';
 import '../../features/home/home_providers.dart';
 import '../../features/library/playlists.dart';
@@ -150,8 +151,11 @@ List<WaveMenuEntry> waveTrackMenuItems({
       leading: const Icon(FluentIcons.play, size: 15),
       label: 'Play',
       hint: 'Enter',
-      onPressed: () =>
-          player.play(track, sourceLabel: 'Context menu'),
+      onPressed: () => player.play(
+        track,
+        sourceLabel: 'Context menu',
+        startRadio: ref.read(prefsProvider).autoplaySimilar,
+      ),
     ),
     WaveMenuAction(
       leading: const Icon(FluentIcons.add, size: 15),

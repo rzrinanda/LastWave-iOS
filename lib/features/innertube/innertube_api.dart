@@ -3539,27 +3539,60 @@ class InnerTubeMusicApi {
     int limit = 30,
     bool prefetchStreams = false,
   }) async {
-    if (videoId.trim().isEmpty || limit <= 0) return const [];
+    final cleanId = videoId.trim();
+    if (cleanId.isEmpty || limit <= 0) return const [];
     await _ensureConfig();
-    final root = await _post(
-      '$musicApi/next?key=$_apiKey&prettyPrint=false',
-      body: {
-        'context': _webContext(_clientVersion, _visitorData),
-        'videoId': videoId,
-        'playlistId': 'RDAMVM$videoId',
-        'params': 'wAEB',
-        'isAudioOnly': true,
-      },
-      clientName: 'WEB_REMIX',
-      clientVersion: _clientVersion,
-      userAgent: webUserAgent,
-      callTimeout: const Duration(seconds: 8),
-    );
-    final results = _parseSongRenderers(root)
-        .where((t) => t.videoId != videoId)
-        .take(limit)
-        .toList();
-    return results;
+
+    Future<List<YouTubeMusicTrack>> request({
+      required String playlistId,
+      String? params,
+      int maxAttempts = 2,
+    }) async {
+      final root = await _post(
+        '$musicApi/next?key=$_apiKey&prettyPrint=false',
+        body: {
+          'context': _webContext(_clientVersion, _visitorData),
+          'videoId': cleanId,
+          'playlistId': playlistId,
+          if (params != null && params.isNotEmpty) 'params': params,
+          'isAudioOnly': true,
+        },
+        clientName: 'WEB_REMIX',
+        clientVersion: _clientVersion,
+        userAgent: webUserAgent,
+        maxAttempts: maxAttempts,
+        callTimeout: const Duration(seconds: 8),
+      );
+      return _parseSongRenderers(root)
+          .where((t) => t.videoId != cleanId)
+          .take(limit)
+          .toList();
+    }
+
+    try {
+      final primary = await request(
+        playlistId: 'RDAMVM$cleanId',
+        params: 'wAEB',
+      );
+      if (primary.isNotEmpty) return primary;
+    } catch (_) {}
+
+    try {
+      final withoutParams = await request(
+        playlistId: 'RDAMVM$cleanId',
+        maxAttempts: 1,
+      );
+      if (withoutParams.isNotEmpty) return withoutParams;
+    } catch (_) {}
+
+    try {
+      return await request(
+        playlistId: 'RD$cleanId',
+        maxAttempts: 1,
+      );
+    } catch (_) {
+      return const [];
+    }
   }
 
 
