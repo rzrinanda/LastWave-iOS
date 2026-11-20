@@ -1,28 +1,54 @@
 import 'package:flutter/cupertino.dart'
-    show CupertinoAdaptiveTextSelectionToolbar, cupertinoTextSelectionHandleControls;
+    show cupertinoTextSelectionHandleControls;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/widgets.dart'
-    show BuildContext, EditableTextState, TextSelectionControls, Widget;
-import 'package:fluent_ui/fluent_ui.dart' show TextBox;
+    show BuildContext, ContextMenuButtonItem, ContextMenuButtonType, EditableTextState, SizedBox, TextSelectionControls, Widget;
+import 'package:fluent_ui/fluent_ui.dart'
+    show TextBox, WindowsTextSelectionToolbar;
 
-/// Keep iOS-native selection handles, highlighting, and context toolbar.
-/// Desktop selection remains Fluent-native.
+/// Keep iOS selection handles, but use the Fluent desktop-style toolbar.
+/// Keyboard shortcut labels are suppressed by converting the menu items to
+/// custom labeled actions before passing them to the Fluent toolbar.
 TextSelectionControls? get waveTextSelectionControls =>
     defaultTargetPlatform == TargetPlatform.iOS
         ? cupertinoTextSelectionHandleControls
         : null;
 
-/// Use the iOS-native selection toolbar on iPhone and iPad. The Fluent
-/// desktop toolbar includes keyboard-shortcut hints (Ctrl+C, Ctrl+V, etc.)
-/// that are irrelevant on touch devices. Keep Fluent's menu on desktop.
 Widget waveTextContextMenuBuilder(
   BuildContext context,
   EditableTextState state,
 ) {
   if (defaultTargetPlatform == TargetPlatform.iOS) {
-    return CupertinoAdaptiveTextSelectionToolbar.editableText(
-      editableTextState: state,
+    final items = state.contextMenuButtonItems
+        .map(
+          (item) => ContextMenuButtonItem(
+            type: ContextMenuButtonType.custom,
+            label: item.label ?? _labelFor(item.type),
+            onPressed: item.onPressed,
+          ),
+        )
+        .toList();
+
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return WindowsTextSelectionToolbar(
+      buttonItems: items,
+      anchors: state.contextMenuAnchors,
     );
   }
+
   return TextBox.defaultContextMenuBuilder(context, state);
 }
+
+String _labelFor(ContextMenuButtonType type) => switch (type) {
+  ContextMenuButtonType.cut => 'Cut',
+  ContextMenuButtonType.copy => 'Copy',
+  ContextMenuButtonType.paste => 'Paste',
+  ContextMenuButtonType.selectAll => 'Select All',
+  ContextMenuButtonType.delete => 'Delete',
+  ContextMenuButtonType.lookUp => 'Look Up',
+  ContextMenuButtonType.searchWeb => 'Search Web',
+  ContextMenuButtonType.share => 'Share',
+  ContextMenuButtonType.liveTextInput => 'Live Text Input',
+  ContextMenuButtonType.custom => '',
+};
